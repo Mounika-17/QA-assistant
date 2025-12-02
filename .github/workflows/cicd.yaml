@@ -1,82 +1,53 @@
-name: Deploy Application Docker Image to EC2 instance
+deploy:
+  name: Deploy to self-hosted (EC2)
+  needs: build-and-push
+  runs-on: [ self-hosted, linux, x64 ]
 
-on:
-  push:
-    branches: [ main ]
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v3
 
-jobs:
-  build-and-push:
-    name: Build & Push to ECR
-    runs-on: ubuntu-latest
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
 
-    outputs:
-      image: ${{ steps.build-image.outputs.image }}
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
+    - name: Set IMAGE env from build job output
+      # Put the image string into GITHUB_ENV so subsequent steps see it reliably
+      run: |
+        echo "IMAGE=${{ needs.build-and-push.outputs.image }}" >> $GITHUB_ENV
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+    - name: Debug: show resolved image (will be masked for secrets if any)
+      run: |
+        echo "Resolved IMAGE => $IMAGE"
+        # also show registry + repo so we can see where it's pulling from
+        echo "Registry => ${{ steps.login-ecr.outputs.registry }}"
+        echo "Repo => ${{ secrets.ECR_REPO }}"
 
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+    - name: Pull & Run Docker image on self-hosted runner
+      run: |
+        # fail fast if IMAGE is empty
+        if [ -z "$IMAGE" ]; then
+          echo "ERROR: IMAGE is empty. Aborting."
+          exit 1
+        fi
 
-      - name: Build, tag, and push image to Amazon ECR
-        id: build-image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: ${{ secrets.ECR_REPO }}
-          IMAGE_TAG: latest
-        run: |
-          docker build -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" .
-          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
-          # set step output so job outputs can reference it
-          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+        docker pull "$IMAGE"
 
-  deploy:
-    name: Deploy to self-hosted (EC2)
-    needs: build-and-push
-    # match your runner labels exactly (use the labels shown in your runner UI)
-    runs-on: self-hosted
+        if docker ps -a --format '{{.Names}}' | grep -q '^myapp$'; then
+          docker rm -f myapp || true
+        fi
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
-
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Pull & Run Docker image on self-hosted runner
-        env:
-          IMAGE: ${{ needs.build-and-push.outputs.image }}
-        run: |
-          # Ensure Docker is available on the self-hosted runner
-          docker pull "$IMAGE"
-
-          # stop old container if exists (modify container name if required)
-          if docker ps -a --format '{{.Names}}' | grep -q '^myapp$'; then
-            docker rm -f myapp || true
-          fi
-
-          # Run the container, pass the secrets you have (GEMINI_API_KEY shown)
-          docker run -d --name myapp \
-            -e AWS_ACCESS_KEY_ID="${{ secrets.AWS_ACCESS_KEY_ID }}" \
-            -e AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
-            -e AWS_DEFAULT_REGION="${{ secrets.AWS_DEFAULT_REGION }}" \
-            -e GEMINI_API_KEY="${{ secrets.GEMINI_API_KEY }}" \
-            -p 8080:8080 \
-            "$IMAGE"
+        docker run -d --name myapp \
+          -e AWS_ACCESS_KEY_ID="${{ secrets.AWS_ACCESS_KEY_ID }}" \
+          -e AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
+          -e AWS_DEFAULT_REGION="${{ secrets.AWS_DEFAULT_REGION }}" \
+          -e GEMINI_API_KEY="${{ secrets.GEMINI_API_KEY }}" \
+          -p 8080:8080 \
+          "$IMAGE"
