@@ -14,9 +14,7 @@ jobs:
     runs-on: ubuntu-latest
 
     outputs:
-      ecr_registry: ${{ steps.login-ecr.outputs.registry }}
-      ecr_repository: ${{ secrets.ECR_REPO }}
-      image_tag: ${{ steps.build-image.outputs.image_tag }}
+      image: ${{ steps.set-output.outputs.image }}
 
     steps:
       - name: Checkout
@@ -44,9 +42,18 @@ jobs:
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
           echo "Pushing image..."
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          
-          echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
-          echo "Full image: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          echo "Image pushed: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+      - name: Set output for next job
+        id: set-output
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ secrets.ECR_REPO }}
+          IMAGE_TAG: latest
+        run: |
+          FULL_IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          echo "image=$FULL_IMAGE" >> $GITHUB_OUTPUT
+          echo "Output set to: $FULL_IMAGE"
 
   Continuous-Deployment:
     name: Deploy to self-hosted (EC2)
@@ -70,31 +77,23 @@ jobs:
 
       - name: Pull image
         env:
-          ECR_REGISTRY: ${{ needs.Continuous-Integration.outputs.ecr_registry }}
-          ECR_REPOSITORY: ${{ needs.Continuous-Integration.outputs.ecr_repository }}
-          IMAGE_TAG: ${{ needs.Continuous-Integration.outputs.image_tag }}
+          IMAGE: ${{ needs.Continuous-Integration.outputs.image }}
         run: |
-          IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          echo "Received IMAGE value: '$IMAGE'"
           
-          if [ -z "$IMAGE" ] || [ "$IMAGE" == "/:latest" ]; then 
-            echo "ERROR: Image variable is empty or malformed. Cannot deploy."
-            echo "ECR_REGISTRY: $ECR_REGISTRY"
-            echo "ECR_REPOSITORY: $ECR_REPOSITORY"
-            echo "IMAGE_TAG: $IMAGE_TAG"
+          if [ -z "$IMAGE" ]; then 
+            echo "ERROR: Image variable is empty. Cannot deploy."
             exit 1
           fi
           
-          echo "Image to deploy: $IMAGE"
+          echo "Pulling image: $IMAGE"
           docker pull "$IMAGE"
 
       - name: Stop + remove existing container (if any), then run new container
         env:
-          ECR_REGISTRY: ${{ needs.Continuous-Integration.outputs.ecr_registry }}
-          ECR_REPOSITORY: ${{ needs.Continuous-Integration.outputs.ecr_repository }}
-          IMAGE_TAG: ${{ needs.Continuous-Integration.outputs.image_tag }}
+          IMAGE: ${{ needs.Continuous-Integration.outputs.image }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
           CONTAINER_NAME="qa-assistant"
           FAISS_DIR="/srv/qa_faiss_store"
 
@@ -107,7 +106,7 @@ jobs:
           echo "Create host FAISS folder if missing"
           sudo mkdir -p "${FAISS_DIR}" || mkdir -p "${FAISS_DIR}"
 
-          echo "Run new container from $IMAGE"
+          echo "Running new container from: $IMAGE"
           docker run -d \
             --name $CONTAINER_NAME \
             -p 8000:8000 \
