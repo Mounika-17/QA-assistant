@@ -1,53 +1,99 @@
-deploy:
-  name: Deploy to self-hosted (EC2)
-  needs: build-and-push
-  runs-on: [ self-hosted, Linux, X64 ]
+name: Deploy Application Docker Image to EC2 instance
 
-  steps:
-    - name: Checkout
-      uses: actions/checkout@v3
+on:
+  push:
+    branches: [ main ]
 
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v2
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+jobs:
+  build-and-push:
+    name: Build & Push to ECR
+    runs-on: ubuntu-latest
 
-    - name: Login to Amazon ECR
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v2
+    # expose job output so deploy job can read it
+    outputs:
+      image: ${{ steps.build-image.outputs.image }}
 
-    - name: Set IMAGE env from build job output
-      # Put the image string into GITHUB_ENV so subsequent steps see it reliably
-      run: |
-        echo "IMAGE=${{ needs.build-and-push.outputs.image }}" >> $GITHUB_ENV
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
 
-    - name: Debug: show resolved image (will be masked for secrets if any)
-      run: |
-        echo "Resolved IMAGE => $IMAGE"
-        # also show registry + repo so we can see where it's pulling from
-        echo "Registry => ${{ steps.login-ecr.outputs.registry }}"
-        echo "Repo => ${{ secrets.ECR_REPO }}"
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
 
-    - name: Pull & Run Docker image on self-hosted runner
-      run: |
-        # fail fast if IMAGE is empty
-        if [ -z "$IMAGE" ]; then
-          echo "ERROR: IMAGE is empty. Aborting."
-          exit 1
-        fi
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-        docker pull "$IMAGE"
+      - name: Build, tag, and push image to Amazon ECR
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ secrets.ECR_REPO }}
+          IMAGE_TAG: latest
+        run: |
+          docker build -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" .
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          # set the step output for the job
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> "$GITHUB_OUTPUT"
 
-        if docker ps -a --format '{{.Names}}' | grep -q '^myapp$'; then
-          docker rm -f myapp || true
-        fi
+  deploy:
+    name: Deploy to self-hosted (EC2)
+    needs: build-and-push
+    # safe explicit label list (use exact labels shown in your runner UI).
+    # If you prefer a simpler match, you can replace this with `runs-on: self-hosted`
+    runs-on: [ "self-hosted", "Linux", "X64" ]
 
-        docker run -d --name myapp \
-          -e AWS_ACCESS_KEY_ID="${{ secrets.AWS_ACCESS_KEY_ID }}" \
-          -e AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
-          -e AWS_DEFAULT_REGION="${{ secrets.AWS_DEFAULT_REGION }}" \
-          -e GEMINI_API_KEY="${{ secrets.GEMINI_API_KEY }}" \
-          -p 8080:8080 \
-          "$IMAGE"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set IMAGE env from build job output
+        run: |
+          # write image into GITHUB_ENV so subsequent steps get it as $IMAGE
+          echo "IMAGE=${{ needs.build-and-push.outputs.image }}" >> $GITHUB_ENV
+
+      - name: 'Debug: show resolved image (masked if secrets)'
+
+        run: |
+          echo "Resolved IMAGE => ${IMAGE:-<empty>}"
+          echo "Registry => ${{ steps.login-ecr.outputs.registry }}"
+          echo "Repo => ${{ secrets.ECR_REPO }}"
+
+      - name: Pull & Run Docker image on self-hosted runner
+        run: |
+          if [ -z "$IMAGE" ]; then
+            echo "ERROR: IMAGE is empty. Aborting."
+            exit 1
+          fi
+
+          # Pull the image
+          docker pull "$IMAGE"
+
+          # Remove old container if exists
+          if docker ps -a --format '{{.Names}}' | grep -q '^myapp$'; then
+            docker rm -f myapp || true
+          fi
+
+          # Run the container (adjust envs and port mapping as required)
+          docker run -d --name myapp \
+            -e AWS_ACCESS_KEY_ID="${{ secrets.AWS_ACCESS_KEY_ID }}" \
+            -e AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
+            -e AWS_DEFAULT_REGION="${{ secrets.AWS_DEFAULT_REGION }}" \
+            -e GEMINI_API_KEY="${{ secrets.GEMINI_API_KEY }}" \
+            -p 8080:8080 \
+            "$IMAGE"
