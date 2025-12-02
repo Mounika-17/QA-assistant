@@ -43,7 +43,7 @@ jobs:
     name: Deploy to self-hosted (EC2)
     needs: build-and-push
     # match your runner labels exactly (use the labels shown in your runner UI)
-    runs-on: [ self-hosted, linux, x64 ]
+    runs-on: self-hosted
 
     steps:
       - name: Checkout
