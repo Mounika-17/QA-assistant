@@ -12,6 +12,10 @@ jobs:
   Continuous-Integration:
     name: Build and Push Docker Image
     runs-on: ubuntu-latest
+    
+    # 🚨 FIX 1: Define the job's outputs so the next job can access the image URL
+    outputs:
+      image: ${{ steps.build-image.outputs.image }}
 
     steps:
       - name: Checkout
@@ -40,18 +44,24 @@ jobs:
           echo "Pushing image..."
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
-          # set job output (new recommended way)
+          # Set step output (which is then exposed as a job output in FIX 1)
           echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
   Continuous-Deployment:
     name: Deploy to self-hosted (EC2)
     needs: Continuous-Integration
-    runs-on: self-hosted
+    
+    # 🚨 FIX 2: Use an array of labels for more robust runner matching.
+    # This should help resolve the "waiting for a runner" hang.
+    runs-on: [self-hosted, Linux]
 
     steps:
       - name: Checkout
         uses: actions/checkout@v3
 
+      # Note: These AWS steps are often redundant on the self-hosted runner 
+      # if it's already configured to use the AWS CLI/Docker, but we leave them 
+      # for complete ECR login.
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
@@ -65,8 +75,14 @@ jobs:
 
       - name: Pull image
         env:
+          # Now correctly pulling the image URL from the previous job's output (FIX 1)
           IMAGE: ${{ needs.Continuous-Integration.outputs.image }}
         run: |
+          # Use a default value in case the output is unexpectedly empty
+          if [ -z "$IMAGE" ]; then 
+            echo "ERROR: Image variable is empty. Cannot deploy."
+            exit 1
+          fi
           echo "Image to deploy: $IMAGE"
           docker pull "$IMAGE"
 
@@ -80,14 +96,10 @@ jobs:
           CONTAINER_NAME="qa-assistant"
 
           echo "Stopping any existing container..."
-          if docker ps -q -f name=$CONTAINER_NAME; then
-            docker stop $CONTAINER_NAME || true
-          fi
+          docker stop $CONTAINER_NAME || true
 
           echo "Removing old container if present..."
-          if docker ps -a -q -f name=$CONTAINER_NAME; then
-            docker rm $CONTAINER_NAME || true
-          fi
+          docker rm $CONTAINER_NAME || true
 
           echo "Create host FAISS folder if missing"
           mkdir -p "${FAISS_DIR}"
