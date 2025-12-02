@@ -12,8 +12,8 @@ jobs:
   Continuous-Integration:
     name: Build and Push Docker Image
     runs-on: ubuntu-latest
-    
-    # 🚨 FIX 1: Define the job's outputs so the next job can access the image URL
+
+    # Define the job's outputs so the next job can access the image URL
     outputs:
       image: ${{ steps.build-image.outputs.image }}
 
@@ -44,22 +44,21 @@ jobs:
           echo "Pushing image..."
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
-          # Set step output (which is then exposed as a job output in FIX 1)
+          # Set step output (recommended way)
           echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
   Continuous-Deployment:
     name: Deploy to self-hosted (EC2)
     needs: Continuous-Integration
-    
-    # 🚨 FIX 2: Use an array of labels for more robust runner matching.
-    # This should help resolve the "waiting for a runner" hang.
+
+    # Use an array of labels for more robust runner matching
     runs-on: [self-hosted, Linux]
 
     steps:
       - name: Checkout
         uses: actions/checkout@v3
 
-      # Note: These AWS steps are often redundant on the self-hosted runner 
+      # These AWS steps are often redundant on the self-hosted runner 
       # if it's already configured to use the AWS CLI/Docker, but we leave them 
       # for complete ECR login.
       - name: Configure AWS credentials
@@ -75,10 +74,10 @@ jobs:
 
       - name: Pull image
         env:
-          # Now correctly pulling the image URL from the previous job's output (FIX 1)
+          # Pull the image URL from the previous job's output
           IMAGE: ${{ needs.Continuous-Integration.outputs.image }}
         run: |
-          # Use a default value in case the output is unexpectedly empty
+          # Use a default check in case the output is unexpectedly empty
           if [ -z "$IMAGE" ]; then 
             echo "ERROR: Image variable is empty. Cannot deploy."
             exit 1
