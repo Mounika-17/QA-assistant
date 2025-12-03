@@ -103,7 +103,7 @@ python -m app.app
 http://localhost:8000
 
 
-🌐 ### Live Demo on Hugging Face Spaces  
+### 🌐 Live Demo on Hugging Face Spaces  
 
 You can test the working app without cloning or installing anything:  
 
@@ -112,13 +112,13 @@ You can test the working app without cloning or installing anything:
 This link runs the app inside Hugging Face’s Docker environment.  
 
 
-🤝### Contributing
+### 🤝 Contributing
 
 Contributions, suggestions, and improvements are welcome!
 Feel free to open issues or submit pull requests.
 
 
-📄 ###License
+### 📄 License
 
 MIT License
 
