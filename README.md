@@ -74,8 +74,8 @@ qa-assistant/
 
 Follow these steps after cloning the repo.
 
-###  Step 1- Clone the repository**
-```bash
+###  Step 1- Clone the repository  
+
 git clone https://github.com/<your-username>/qa-assistant.git
 cd qa-assistant
 
