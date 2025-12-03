@@ -74,35 +74,34 @@ qa-assistant/
 
 Follow these steps after cloning the repo.
 
-### **1️⃣ Clone the repository**
+###  Step 1- Clone the repository**
 ```bash
 git clone https://github.com/<your-username>/qa-assistant.git
 cd qa-assistant
 
 
-2️⃣ Create a Virtual Environment
+### Step 2-  Create a Virtual Environment
 python -m venv venv  
 source venv/bin/activate      # macOS / Linux  
 venv\Scripts\activate         # Windows
 
 
-3️⃣ Install dependencies  
+### Step 3- Install dependencies  
 pip install -r requirements.txt
 
-4️⃣ Add your API Keys
+### Step 4- Add your API Keys
 GEMINI_API_KEY=your_key_here  
 
 
-5️⃣ (Optional) Build or refresh FAISS index  
+### Step 5- Build or refresh FAISS index  
 python -m app.rag_store
 
-6️⃣ Run the Flask App
+### Step 6-  Run the Flask App
 python -m app.app
 
-7️⃣ Open in browser
+### Step 7- Open in browser
 http://localhost:8000
 
-'''
 
 🌐 Live Demo on Hugging Face Spaces  
 
